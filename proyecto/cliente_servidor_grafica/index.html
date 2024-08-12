@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <title>Prueba de websocket</title>
+
+    <script src="https://code.jquery.com/jquery-3.6.4.slim.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.11.8/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/5.3.1/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-1.12.4.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.4/socket.io.js" integrity="sha512-aMGMvNYu8Ue4G+fHa359jcPb1u+ytAF+P2SCb+PxrjCdO3n3ZTxJ30zuH39rimUggmTwmh2u7wvQsDTHESnmfQ==" crossorigin="anonymous"></script>
+    <script nonce="undefined" src="https://cdn.zingchart.com/zingchart.min.js"></script>
+    <script nonce="undefined" src="https://cdn.zingchart.com/modules/zingchart-zoom-buttons.min.js"></script>
+</head>
+<style>
+    table {
+        border-collapse: collapse;
+        width: 500px;
+        height: 100px;
+    }
+    th, td {
+        border: 1px solid black;
+        padding: 8px;
+        text-align: left;
+        width: auto;
+        text-align: center; /* Centrar el texto */
+    }
+    td{
+        font-size: 45px;
+    }
+    th {
+        background-color: #f2f2f2;
+    }
+
+    .chart--container {
+      min-height: 530px;
+      width: 100%;
+      height: 100%;
+    }
+
+    input {
+      font-family: 'Lucida Sans Unicode';
+    }
+
+    .zc-ref {
+      display: none;
+    }
+    body {
+        font-family: Arial, sans-serif;
+    }
+</style>
+<body>
+    
+    <h1>Proyecto FIS200</h1>
+
+    <h2>Tabla de datos</h2>
+    <table id="miTabla">
+        <thead>
+            <tr>
+                <th>Temperatura (ºC)</th>
+                <!--<th>ID</th>
+                <th>Conteo</th>
+                <th>Fecha</th>
+                <th>columna5</th>-->
+            </tr>
+        </thead>
+        <tbody>
+
+        </tbody>
+    </table>
+    <br><br>
+    
+    <div id="myChart" class="chart--container">
+        <a class="zc-ref" href="https://www.zingchart.com/">Powered by ZingChart</a>
+    </div>
+
+</body>
+<script>
+    function obtenerParametroUrl(nombre, df='') {
+            nombre = nombre.replace(/[[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + nombre + '=([^&#]*)');
+            var resultados = regex.exec(location.search);
+            return resultados === null ? df : decodeURIComponent(resultados[1].replace(/\+/g, ' '));
+        }
+    
+    var svwebsocket_ip = obtenerParametroUrl('h', '0.0.0.0')
+    var svwebsocket_port = obtenerParametroUrl('p', '5000')
+</script>
+
+<script>
+    async function getUserId() {
+    const response = await fetch('http://'+svwebsocket_ip+':'+svwebsocket_port+'/generate_user_id');
+    const data = await response.json();
+    return data.user_id;
+    }
+
+    // Manejo de la conexión WebSocket
+    var x_v = 1;
+    async function connectWebSocket() {
+        var processedIndices = new Set();
+        // Si ya hay una conexión WebSocket, cerrarla antes de crear una nueva
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+        }
+
+        // Crear la nueva conexión WebSocket
+        const userId = await getUserId();
+        var ws = new WebSocket('ws://'+svwebsocket_ip+':'+svwebsocket_port+'/ws/'+userId);
+
+        ws.onopen = function(event) {
+            console.log('Conexión establecida');
+            ws.send(JSON.stringify({ message: 'Inicio' }));
+            
+        };
+
+        // Recibir el JSON de los tados
+        ws.onmessage = function(event) {
+            console.log("Received data from server:", event.data);
+            var datosJSON = JSON.parse(event.data);
+
+            // Obtener todos los índices de las filas enviadas en este evento
+            var allIndices = [];
+            Object.keys(datosJSON).forEach(key => {
+                if (key !== 'ID') {
+                    allIndices.push(...datosJSON[key]);
+                }
+            });
+
+            // Verificar si algún índice ya está en los procesados
+            var nuevosIndices = allIndices.filter(idx => !processedIndices.has(idx));
+
+            if (nuevosIndices.length > 0) {
+                // Añadir nuevos índices al conjunto de procesados
+                nuevosIndices.forEach(idx => processedIndices.add(idx));
+
+                console.log('x_v', x_v);
+
+                // Procesar los datos solo si hay nuevos índices
+                filas_datos_json(datosJSON);
+                if (x_v == 1) {
+                    ws.send(JSON.stringify({ message: 'Siguiente' }));
+                    x_v = 0;
+                    console.log('x_v', x_v);
+                }
+                datos_zingchart(datosJSON);
+
+            } else {
+                console.log("Todos los datos ya han sido procesados, no se realizan cambios.");
+            }
+        };
+
+        // Mostrar errores
+        ws.onerror = function(error) {
+            console.error("WebSocket error:", error);
+        };
+
+        // Avisar de desconexión con el servidor websocket
+        ws.onclose = function(event) {
+            console.log("Disconnected from WebSocket server");
+            // Intentar reconectar después de un breve período de tiempo
+            setTimeout(connectWebSocket, 3000);
+        }; }
+
+        connectWebSocket();
+</script>
+<script>
+function convertirATiempoUnix(value) {
+    // Asegúrate de que el formato de entrada sea correcto
+    const fechaString = value.replace(" ", "T") + "Z";
+    
+    // Crear un objeto Date a partir de la cadena
+    const fecha = new Date(fechaString);
+    
+    // Comprobar si la fecha es válida
+    if (isNaN(fecha.getTime())) {
+        throw new Error("Fecha inválida");
+    }
+
+    // Obtener el tiempo Unix en milisegundos y convertirlo a segundos
+    const tiempoUnix = Math.floor(fecha.getTime());
+    return parseInt(tiempoUnix);
+}
+
+function datos_zingchart(datosJSON) {
+    let data = datosJSON;
+    console.log("Datos recibidos:", data);
+
+    // Arrays para almacenar los nuevos valores y etiquetas
+    let newValues = [];
+    let newLabels = [];
+
+    // Iterar sobre las columnas de datos
+    Object.keys(data).forEach((columna, index) => {
+        console.log(columna, index);
+        if (index == 2){
+            index = 0
+        }
+        if (data[columna]) {
+            if (columna === 'finsert') {
+                // Convertir los valores de columna5 a enteros para el eje X
+                chartData['serie' + (index + 1)] = data[columna].map(value => convertirATiempoUnix(value)); //
+            } else {
+                // Crear pares [columna5[x], columnaY[x]] para todas las columnas Y
+                let pairs = data['finsert'].map((value, idx) => {
+                    chartData['serie' + (index + 1)].push([convertirATiempoUnix(value), data[columna][idx]]); //
+                    return [convertirATiempoUnix(value), data[columna][idx]];
+                });
+
+                // Añadir valores para la serie en ZingChart
+                zingchart.exec('myChart', 'appendseriesvalues', {
+                    plotindex: index,
+                    values: pairs
+                });
+            }
+
+            // Añadir etiquetas si es serie5 (eje X)
+            if (index === 3) { // serie5 está en el índice 4 (0-indexed)
+                newValues = data[columna].map(value => convertirATiempoUnix(value));
+                newLabels = data[columna].map((value, idx) => convertirATiempoUnix(value).toString()); // Utilizar los valores de columna5 como etiquetas
+            }
+        }
+    });
+    console.log("Datos de chartData: ", chartData);
+};
+
+
+</script>
+
+<script>
+let chartData = {
+serie1: [], // tiempo
+serie2: [], // ID
+serie3: [], //tempC
+serie4: [], // finsert
+//serie5: []
+};
+
+ZC.LICENSE = ["569d52cefae586f634c54f86dc99e6a9", "b55b025e438fa8a98e32482b5f768ff5"]; // window:load event for Javascript to run after HTML
+// because this Javascript is injected into the document head
+function filas_datos_json(datosJSON) {
+    // Limpiar las filas existentes en la tabla
+    var tbody = document.querySelector("#miTabla tbody");
+    tbody.innerHTML = "";
+
+    // Obtener la longitud máxima de los arrays en cada columna
+    var maxFilas = Math.max(...Object.values(datosJSON).map(arr => arr.length));
+
+    // Generar las filas de la tabla con los datos actualizados
+    for (var i = 0; i < maxFilas; i++) {
+        var fila = document.createElement("tr");
+
+        // Iterar sobre cada columna y añadir el valor correspondiente a la fila
+        Object.keys(datosJSON).forEach(columna => {
+            if (columna == 'tempC') {
+                var celda = document.createElement("td");
+                var valor = datosJSON[columna][i];
+                celda.textContent = valor !== undefined ? valor : ''; // Usar espacio en blanco si no hay valor
+                fila.appendChild(celda);
+            }
+        });
+
+        tbody.appendChild(fila);
+    }
+}
+</script>
+
+<script>
+    zingchart.bind('myChart', 'reload', function() {
+    console.log('Se ha iniciado el reload del gráfico.');
+    inicializarGrafico(chartData);
+    });
+
+</script>
+
+<script>
+
+const customPurplePalette = [
+    '#6A0DAD', // Dark Purple
+    '#8A2BE2', // Blue Violet
+    '#9370DB', // Medium Purple
+    '#D8BFD8', // Thistle
+    '#E6E6FA', // Lavender
+    '#BA55D3', // Medium Orchid
+    '#DA70D6', // Orchid
+];
+
+    function inicializarGrafico(a) {
+    // Configuración inicial del gráfico
+    let chartConfig = {
+        type: 'line',
+        globals: {
+            fontFamily: 'Lucida Sans Unicode'
+        },
+        plotarea: {
+            margin: '50px 40px 40px 80px'
+        },
+        scaleX: {
+            guide: {
+                alpha: 1,
+                lineStyle: 'solid',
+                lineWidth: '1px',
+            },
+            item: {
+                fontSize: '10px'
+            },
+            transform: {
+                type: 'date'
+            },
+            zooming: true,
+        },
+        scaleY: {
+            autoFit: false,
+            guide: {
+                lineStyle: 'solid'
+            },
+            item: {
+                fontSize: '10px'
+            },
+            minValue: 0,  // Valor mínimo en el eje Y
+            maxValue: 140,  // Valor máximo en el eje Y
+            step: 20,  // Paso entre los valores del eje Y
+            short: true
+        },
+        preview: {
+            adjustLayout: true,
+            borderWidth: '1px',
+            handle: {
+                height: '20px',
+                lineWidth: '0px'
+            }
+        },
+        noData: {
+            text: 'No data found. Try reloading again',
+            backgroundColor: '#efefef'
+        },
+        series: [
+//        { text: 'Serie 1 (L/m²)', values: a.serie1, palette: 0, lineType: 'smooth', 'line-width': '2px' },
+//        { text: 'Serie 2 (kPa)', values: a.serie2, palette: 1, lineType: 'smooth', 'line-width': '2px' },
+        { text: 'Serie 1 (ºC)', values: a.serie3, palette: 6, lineType: 'smooth', 'line-width': '2px' },
+//        { text: 'Serie 4 (cd)', values: a.serie4, palette: 3, lineType: 'smooth', 'line-width': '2px' }
+            //{ text: 'Serie 5', values: a.serie5, palette:4 }
+        ],
+        palette: customPurplePalette,
+        guide: {
+            marker: {
+                type: 'triangle',
+                size: '7px',
+            },
+            plotLabel: {
+                text: '<span style="color:%color">%t</span>: %v',
+                backgroundColor: '#000',
+                borderRadius: '5px',
+                fontColor: '#FFF',
+                fontSize: '15px',
+                headerText: '%kt',
+            },
+        },
+        plot: {
+            tooltip: {
+                visible: true,
+            },
+            alphaArea: 1,
+            aspect: 'spline', //curveado de líneas
+            hoverState: {
+                backgroundColor: 'none',
+            },
+            lineWidth: '0px',
+            marker: {
+                visible: true,
+            },
+        },
+        legend: {
+            item: {
+                fontColor: '#333', // Color de la fuente
+                fontSize: '12px', // Tamaño de la fuente
+                align: 'center',
+                backgroundColor: '#e0e0e0',
+                borderColor: '#fff',
+                layout: 'x4',
+                shadow: true,
+                verticalAlign: 'bottom',
+            },
+            marker: {
+                type: 'square', // Tipo de marcador ('circle', 'triangle', etc.)
+                size: 10, // Tamaño del marcador
+            },
+            header: {
+                text: 'Legend', // Encabezado de la leyenda
+                fontColor: '#333', // Color del texto del encabezado
+                backgroundColor: 'none', // Color de fondo del encabezado (none para transparente)
+                fontSize: '14px', // Tamaño de la fuente del encabezado
+            }
+        }
+    };
+
+    chartConfig.series.forEach(serie => {
+        serie.values.sort((a, b) => a - b);
+    });
+    
+    // Renderizar el gráfico con la configuración inicial
+    zingchart.render({
+        id: 'myChart',
+        data: chartConfig,
+        height: '100%',
+        width: '100%',
+        modules: 'zoom-buttons'
+    });
+}
+</script>
+
+<script>
+window.addEventListener('load', () => {
+    inicializarGrafico(chartData);
+});
+</script>
+
+</html>
